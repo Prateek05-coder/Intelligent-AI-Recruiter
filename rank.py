@@ -11,18 +11,12 @@ from datetime import datetime, date, timezone
 import numpy as np
 from scipy.sparse import vstack
 
-from precompute import build_candidate_text  # reuse identical text-building logic
+from precompute import build_candidate_text  
 
 CHUNK_SIZE = 2000
-# "Today" for recency calculations. In a real deployment this would be
-# datetime.utcnow(); pinned here so scoring is reproducible against the
-# fixed redrob_signals timestamps in the sample data.
 TODAY = datetime.utcnow().date()
 
 
-# --------------------------------------------------------------------------
-# Feature helpers
-# --------------------------------------------------------------------------
 
 def parse_date_safe(s):
     if not s:
@@ -39,7 +33,6 @@ def keyword_score(text: str, core_skill_weights: dict):
     text_l = text.lower()
     total = 0.0
     matched = []
-    # sort by weight desc so the strongest/most specific matches surface first
     for pattern, (weight, display_name) in sorted(
         core_skill_weights.items(), key=lambda kv: -kv[1][0]
     ):
@@ -53,7 +46,7 @@ def trap_penalty_flag(text: str, trap_terms: dict, has_core_skill: bool):
     """Return True if candidate looks like a disqualifier trap."""
     text_l = text.lower()
     if has_core_skill:
-        return False  # having real IR/ranking depth clears the trap
+        return False  
     for _, patterns in trap_terms.items():
         for p in patterns:
             if re.search(p, text_l):
@@ -73,23 +66,23 @@ def is_consulting_only(rec: dict, consulting_companies: set):
     if not companies:
         return False
     non_consulting = [c for c in companies if c not in consulting_companies]
-    return len(non_consulting) == 0  # ALL known companies are consulting shops
+    return len(non_consulting) == 0  
 
 
 def experience_fit(years, cfg):
     exp_cfg = cfg["experience"]
     if years is None:
-        return 0.3  # unknown, mild neutral score
+        return 0.3  
     if years < exp_cfg["hard_floor"]:
         return 0.0
     if years < exp_cfg["min_ideal"]:
-        # ramp 0 -> 1 between hard_floor and min_ideal
+        
         span = exp_cfg["min_ideal"] - exp_cfg["hard_floor"]
         return max(0.0, (years - exp_cfg["hard_floor"]) / span)
     if years <= exp_cfg["max_ideal"]:
         return 1.0
     if years <= exp_cfg["soft_ceiling"]:
-        # gentle decay 1.0 -> 0.6
+        
         span = exp_cfg["soft_ceiling"] - exp_cfg["max_ideal"]
         decay = (years - exp_cfg["max_ideal"]) / span
         return 1.0 - 0.4 * decay
@@ -130,10 +123,10 @@ def honeypot_flag(signals: dict):
         rrr is not None and (rrr < -1 or rrr > 1.0001),
         icr is not None and (icr < -1 or icr > 1.0001),
         oar is not None and (oar < -1 or oar > 1.0001),
-        apps > 500,           # nobody applies to 500 jobs in 30 days
-        views > 20000,        # implausible view count
+        apps > 500,           
+        views > 20000,        
         conn < 0,
-        # perfect stats + zero experience footprint is a classic honeypot
+        
         (rrr == 1.0 and icr == 1.0 and oar == 1.0),
     ]
     return any(checks)
@@ -191,9 +184,6 @@ def location_notice_score(rec: dict, target_locations: set):
     return min(1.0, score)
 
 
-# --------------------------------------------------------------------------
-# Reasoning generator (pure templating over real extracted facts — no LLM)
-# --------------------------------------------------------------------------
 
 def generate_reasoning(rec, years, matched_terms, is_consulting_flag,
                         trap_flag, signals, loc_score, exp_score, hp_flag):
@@ -234,9 +224,6 @@ def generate_reasoning(rec, years, matched_terms, is_consulting_flag,
     return reasoning
 
 
-# --------------------------------------------------------------------------
-# Main pipeline
-# --------------------------------------------------------------------------
 
 def iter_records(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -254,8 +241,6 @@ def process_chunk(chunk_records, artifacts, cfg, vectorizer, jd_vector):
     texts = [build_candidate_text(r) for r in chunk_records]
     tfidf_matrix = vectorizer.transform(texts)
 
-    # cosine similarity against jd_vector (both are already L2-normalized by
-    # TfidfVectorizer's default norm='l2', so dot product == cosine sim)
     sims = (tfidf_matrix @ jd_vector.T).toarray().ravel()
 
     core_skill_weights = artifacts["core_skill_weights"]
@@ -354,7 +339,6 @@ def main():
 
     print(f"[rank] scored {n_seen} candidates in {time.time() - t0:.2f}s")
 
-    # Sort: score descending, tie-break candidate_id ascending
     all_results.sort(key=lambda r: (-r["score"], r["candidate_id"]))
 
     top_k = min(args.top_k, len(all_results))
